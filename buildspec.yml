@@ -1,0 +1,17 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.12
+  build:
+    commands:
+      - echo "Packaging the CloudFormation template (zips src/*/handler.py and uploads to $ARTIFACT_BUCKET)"
+      - aws cloudformation package
+        --template-file templates/app-stack.yaml
+        --s3-bucket "$ARTIFACT_BUCKET"
+        --output-template-file packaged-template.yaml
+
+artifacts:
+  files:
+    - packaged-template.yaml

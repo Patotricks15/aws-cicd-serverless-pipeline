@@ -1,0 +1,144 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Serverless item API (additem / removeitem) deployed by the CI/CD pipeline's
+  Deploy stage. Lambda functions read/write an Items table in DynamoDB behind
+  an API Gateway REST API.
+
+Resources:
+  ItemsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: ItemsTableAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [dynamodb:PutItem, dynamodb:DeleteItem]
+                Resource: !GetAtt ItemsTable.Arn
+
+  AddItemFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: additem-function
+      Handler: handler.lambda_handler
+      Runtime: python3.12
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 10
+      Code: ../src/additem
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref ItemsTable
+
+  RemoveItemFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: removeitem-function
+      Handler: handler.lambda_handler
+      Runtime: python3.12
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 10
+      Code: ../src/removeitem
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref ItemsTable
+
+  ItemsApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: items-api
+      Description: Item API fronting the additem / removeitem Lambda functions.
+
+  AddItemResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ItemsApi
+      ParentId: !GetAtt ItemsApi.RootResourceId
+      PathPart: additem
+
+  RemoveItemResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ItemsApi
+      ParentId: !GetAtt ItemsApi.RootResourceId
+      PathPart: removeitem
+
+  AddItemMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ItemsApi
+      ResourceId: !Ref AddItemResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AddItemFunction.Arn}/invocations
+
+  RemoveItemMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ItemsApi
+      ResourceId: !Ref RemoveItemResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${RemoveItemFunction.Arn}/invocations
+
+  AddItemPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref AddItemFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ItemsApi}/*/*
+
+  RemoveItemPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref RemoveItemFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ItemsApi}/*/*
+
+  ApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: [AddItemMethod, RemoveItemMethod]
+    Properties:
+      RestApiId: !Ref ItemsApi
+
+  ApiStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      RestApiId: !Ref ItemsApi
+      DeploymentId: !Ref ApiDeployment
+      StageName: v1
+
+Outputs:
+  ApiEndpoint:
+    Description: Base URL of the item API.
+    Value: !Sub https://${ItemsApi}.execute-api.${AWS::Region}.amazonaws.com/v1
+  ItemsTableName:
+    Description: Name of the DynamoDB table storing items.
+    Value: !Ref ItemsTable

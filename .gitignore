@@ -1,0 +1,19 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfstate.lock.info
+.terraform.lock.hcl
+crash.log
+
+# CloudFormation packaging output (produced by CodeBuild, not committed)
+packaged-template.yaml
+
+# Diagram generation
+.diagram-venv/
+src/**/__pycache__/
+src/**/*.pyc
+*.zip
+
+# Local env
+.env
